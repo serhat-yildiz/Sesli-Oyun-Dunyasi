@@ -156,6 +156,7 @@ export default function AudioTennisGame() {
             bounceScheduledRef.current = false;
             engineRef.current?.playHit(-0.85, true, 'opponent');
             setLastAnnouncement('Rakip sert karşıladı! Top sana doğru hızla geliyor!');
+            announce('Rakip karşıladı, top geliyor!', 'polite');
           }
         }
       }
@@ -165,7 +166,7 @@ export default function AudioTennisGame() {
 
     animId = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(animId);
-  }, [gameState, match.rallyCount, serveBall, announce]);
+  }, [gameState, serveBall, announce]);
 
   // Oyuncunun Vuruş Yapması
   const handlePlayerHit = useCallback((type: 'straight' | 'left' | 'right' = 'straight') => {
