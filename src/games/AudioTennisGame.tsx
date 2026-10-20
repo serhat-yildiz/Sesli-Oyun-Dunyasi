@@ -14,6 +14,9 @@ export default function AudioTennisGame() {
   const [match, setMatch] = useState<TennisMatchState>(INITIAL_TENNIS_STATE);
   const [lastAnnouncement, setLastAnnouncement] = useState('Akustik Tenis Kortu. Başlamak için butona basın.');
 
+  const matchRef = useRef<TennisMatchState>(INITIAL_TENNIS_STATE);
+  matchRef.current = match;
+
   const engineRef = useRef<AudioTennisAudioEngine | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -39,7 +42,7 @@ export default function AudioTennisGame() {
     ballActiveRef.current = true;
     bounceScheduledRef.current = false;
     ballStartTimeRef.current = performance.now();
-    ballDurationRef.current = match.ballSpeedMs;
+    ballDurationRef.current = matchRef.current.ballSpeedMs;
 
     if (server === 'opponent') {
       ballDirectionRef.current = 'towards_player';
@@ -54,7 +57,7 @@ export default function AudioTennisGame() {
     }
 
     setGameState('rally');
-  }, [match.ballSpeedMs, announce]);
+  }, [announce]);
 
   // Oyun Döngüsü (Topun hareketi ve kaçırılma kontrolü)
   useEffect(() => {
@@ -83,16 +86,16 @@ export default function AudioTennisGame() {
           engineRef.current?.playWallHit();
           engineRef.current?.playPointScored(false);
 
-          const nextOppScore = match.opponentScore + 1;
-          const isGameOver = nextOppScore >= match.targetScore;
+          const nextOppScore = matchRef.current.opponentScore + 1;
+          const isGameOver = nextOppScore >= matchRef.current.targetScore;
 
           if (isGameOver) {
             setGameState('lost');
-            const msg = `Sayı rakibin! Maçı rakip ${nextOppScore} - ${match.playerScore} kazandı. Yeniden oynamak için butona bas.`;
+            const msg = `Sayı rakibin! Maçı rakip ${nextOppScore} - ${matchRef.current.playerScore} kazandı. Yeniden oynamak için butona bas.`;
             setLastAnnouncement(msg);
             announce(msg, 'assertive');
           } else {
-            const msg = `Kaçırdın! Sayı rakibin. Skor: Sen ${match.playerScore}, Rakip ${nextOppScore}.`;
+            const msg = `Kaçırdın! Sayı rakibin. Skor: Sen ${matchRef.current.playerScore}, Rakip ${nextOppScore}.`;
             setLastAnnouncement(msg);
             announce(msg, 'assertive');
             setTimeout(() => {
@@ -114,24 +117,24 @@ export default function AudioTennisGame() {
       if (ballDirectionRef.current === 'towards_opponent') {
         if (progress >= 1.0) {
           // Rakip karşılar (küçük bir şansla rakip de kaçırabilir)
-          const opponentMissChance = match.rallyCount > 6 ? 0.35 : 0.12;
+          const opponentMissChance = matchRef.current.rallyCount > 6 ? 0.35 : 0.12;
           if (Math.random() < opponentMissChance) {
             // Rakip kaçırdı! Oyuncu sayı aldı
             ballActiveRef.current = false;
             engineRef.current?.playWallHit();
             engineRef.current?.playPointScored(true);
 
-            const nextPlayerScore = match.playerScore + 1;
-            const isGameOver = nextPlayerScore >= match.targetScore;
+            const nextPlayerScore = matchRef.current.playerScore + 1;
+            const isGameOver = nextPlayerScore >= matchRef.current.targetScore;
 
             if (isGameOver) {
               setGameState('won');
               engineRef.current?.playMatchWon();
-              const winMsg = `Muazzam! Maç Sayısı! Rakibi ${nextPlayerScore} - ${match.opponentScore} mağlup ettin! Tebrikler!`;
+              const winMsg = `Muazzam! Maç Sayısı! Rakibi ${nextPlayerScore} - ${matchRef.current.opponentScore} mağlup ettin! Tebrikler!`;
               setLastAnnouncement(winMsg);
               announce(winMsg, 'assertive');
             } else {
-              const msg = `Harika vuruş, rakip yetişemedi! Sayı senin! Skor: Sen ${nextPlayerScore}, Rakip ${match.opponentScore}.`;
+              const msg = `Harika vuruş, rakip yetişemedi! Sayı senin! Skor: Sen ${nextPlayerScore}, Rakip ${matchRef.current.opponentScore}.`;
               setLastAnnouncement(msg);
               announce(msg, 'assertive');
               setTimeout(() => {
@@ -200,7 +203,7 @@ export default function AudioTennisGame() {
       const newSpeed = Math.max(800, ballDurationRef.current - (isPerfect ? 140 : 80));
       ballDurationRef.current = newSpeed;
 
-      const nextRally = match.rallyCount + 1;
+      const nextRally = matchRef.current.rallyCount + 1;
       const msg = isPerfect
         ? `MÜKEMMEL ŞUT! Ralli: ${nextRally}! Top fırtına gibi rakibe gidiyor.`
         : `İyi vuruş! Ralli: ${nextRally}.`;
