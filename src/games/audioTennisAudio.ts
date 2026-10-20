@@ -1,7 +1,8 @@
 /**
- * Akustik Tenis Ses Motoru (Audio Tennis Synthesizer)
- * Masa tenisi vuruş sesleri, stereo falso efektleri,
- * ağa takılma, duvar çarpması ve seyirci alkışı simülasyonu.
+ * Akustik Tenis Profesyonel Ses Motoru (High-Fidelity Audio Synthesizer)
+ * - Fiziksel Masa & Raket Çarpması (Transient + Resonant Body)
+ * - Havada Uçan Top Hışırtısı (Whoosh / Doppler stereo panner)
+ * - Kenar vuruşu, net ve duvar akustiği
  */
 
 export class AudioTennisAudioEngine {
@@ -14,157 +15,192 @@ export class AudioTennisAudioEngine {
   }
 
   /**
-   * Topun Masaya Sekmesi veya Raket Vuruşu
-   * pan: -1 (tam sol - rakip) ile +1 (tam sağ - oyuncu)
-   * isPaddle: Raket vuruşu mu yoksa masa sekmesi mi
-   * quality: 'perfect' | 'good' | 'opponent'
+   * Gerçekçi Masa Tenisi Vuruşu (Transient Click + Tahta/Masa Rezonansı)
+   * isPaddle: true -> Raket vuruşu (tok, esnek kauçuk), false -> Masa sekmesi (tiz plastik, sert masa)
    */
   playHit(pan: number, isPaddle: boolean, quality: 'perfect' | 'good' | 'opponent' = 'good') {
     const now = this.ctx.currentTime;
     const panner = this.ctx.createStereoPanner ? this.ctx.createStereoPanner() : null;
+    const clampedPan = Math.max(-1, Math.min(1, pan));
 
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
+    const hitOutput = this.ctx.createGain();
 
     if (isPaddle) {
-      // Raket vurusu: tok ve rezonansli kauçuk/tahta sesi
-      const baseFreq = quality === 'perfect' ? 620 : 480;
-      osc.type = 'triangle';
-      osc.frequency.setValueAtTime(baseFreq, now);
-      osc.frequency.exponentialRampToValueAtTime(120, now + 0.12);
+      // 1. Transient (Topun rakete ilk çarptığı mikro çıtlama)
+      const clickOsc = this.ctx.createOscillator();
+      const clickGain = this.ctx.createGain();
+      clickOsc.type = 'triangle';
+      clickOsc.frequency.setValueAtTime(quality === 'perfect' ? 850 : 650, now);
+      clickOsc.frequency.exponentialRampToValueAtTime(120, now + 0.025);
+      clickGain.gain.setValueAtTime(0.55, now);
+      clickGain.gain.exponentialRampToValueAtTime(0.001, now + 0.025);
+      clickOsc.connect(clickGain);
+      clickGain.connect(hitOutput);
+      clickOsc.start(now);
+      clickOsc.stop(now + 0.03);
 
-      gain.gain.setValueAtTime(quality === 'perfect' ? 0.45 : 0.35, now);
-      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
+      // 2. Body Resonance (Tahta raket gövdesinin rezonansı)
+      const bodyOsc = this.ctx.createOscillator();
+      const bodyGain = this.ctx.createGain();
+      bodyOsc.type = 'sine';
+      const baseFreq = quality === 'perfect' ? 340 : quality === 'opponent' ? 260 : 300;
+      bodyOsc.frequency.setValueAtTime(baseFreq, now);
+      bodyOsc.frequency.exponentialRampToValueAtTime(95, now + 0.09);
+      bodyGain.gain.setValueAtTime(quality === 'perfect' ? 0.6 : 0.45, now);
+      bodyGain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+      bodyOsc.connect(bodyGain);
+      bodyGain.connect(hitOutput);
+      bodyOsc.start(now);
+      bodyOsc.stop(now + 0.11);
     } else {
-      // Masada sekme: tiz plastik top sesi
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(quality === 'opponent' ? 520 : 700, now);
-      osc.frequency.exponentialRampToValueAtTime(250, now + 0.08);
+      // Masa Sekmesi (Hafif içi boş selüloit masa tenisi topu sekmesi)
+      const bounceOsc = this.ctx.createOscillator();
+      const bounceGain = this.ctx.createGain();
+      bounceOsc.type = 'sine';
+      bounceOsc.frequency.setValueAtTime(1100, now);
+      bounceOsc.frequency.exponentialRampToValueAtTime(320, now + 0.05);
 
-      gain.gain.setValueAtTime(0.3, now);
-      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+      bounceGain.gain.setValueAtTime(0.4, now);
+      bounceGain.gain.exponentialRampToValueAtTime(0.001, now + 0.055);
+
+      bounceOsc.connect(bounceGain);
+      bounceGain.connect(hitOutput);
+      bounceOsc.start(now);
+      bounceOsc.stop(now + 0.06);
+
+      // Masanın ahşap yankılanması (Düşük thump)
+      const tableThump = this.ctx.createOscillator();
+      const tableGain = this.ctx.createGain();
+      tableThump.type = 'triangle';
+      tableThump.frequency.setValueAtTime(180, now);
+      tableThump.frequency.exponentialRampToValueAtTime(60, now + 0.07);
+      tableGain.gain.setValueAtTime(0.3, now);
+      tableGain.gain.exponentialRampToValueAtTime(0.001, now + 0.07);
+      tableThump.connect(tableGain);
+      tableGain.connect(hitOutput);
+      tableThump.start(now);
+      tableThump.stop(now + 0.075);
     }
 
     if (panner) {
-      panner.pan.setValueAtTime(Math.max(-1, Math.min(1, pan)), now);
-      osc.connect(gain);
-      gain.connect(panner);
+      panner.pan.setValueAtTime(clampedPan, now);
+      hitOutput.connect(panner);
       panner.connect(this.masterGain);
     } else {
-      osc.connect(gain);
-      gain.connect(this.masterGain);
+      hitOutput.connect(this.masterGain);
     }
-
-    osc.start(now);
-    osc.stop(now + 0.14);
   }
 
   /**
-   * Boşa Sallama Sesi (Whiff / Miss Swing)
+   * Raketin Boşa Savrulması (Whoosh / Hava Sürtünmesi)
    */
   playWhiff() {
     const now = this.ctx.currentTime;
     const osc = this.ctx.createOscillator();
+    const filter = this.ctx.createBiquadFilter();
     const gain = this.ctx.createGain();
 
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(350, now);
-    osc.frequency.exponentialRampToValueAtTime(90, now + 0.18);
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(450, now);
+    osc.frequency.exponentialRampToValueAtTime(80, now + 0.18);
 
-    gain.gain.setValueAtTime(0.2, now);
-    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.18);
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(800, now);
+    filter.frequency.exponentialRampToValueAtTime(200, now + 0.18);
 
-    osc.connect(gain);
+    gain.gain.setValueAtTime(0.25, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+
+    osc.connect(filter);
+    filter.connect(gain);
     gain.connect(this.masterGain);
 
     osc.start(now);
-    osc.stop(now + 0.2);
+    osc.stop(now + 0.19);
   }
 
   /**
-   * Topun Kaçırılıp Duvara Çarpması (Wall Hit / Miss)
+   * Topun Kaçırılıp Duvara Çarpması (Küt sesi)
    */
   playWallHit() {
     const now = this.ctx.currentTime;
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
 
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(140, now);
-    osc.frequency.linearRampToValueAtTime(45, now + 0.25);
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(160, now);
+    osc.frequency.exponentialRampToValueAtTime(40, now + 0.22);
 
-    gain.gain.setValueAtTime(0.4, now);
-    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+    gain.gain.setValueAtTime(0.5, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
 
     osc.connect(gain);
     gain.connect(this.masterGain);
 
     osc.start(now);
-    osc.stop(now + 0.26);
+    osc.stop(now + 0.23);
   }
 
   /**
-   * Sayı Kazanıldığında Alkış / Başarı Efekti
+   * Puan Kazanıldığında Melodik Tını
    */
   playPointScored(isPlayer: boolean) {
     const now = this.ctx.currentTime;
     if (isPlayer) {
-      // Oyuncu puanı: Sevinçli çan arpeji
-      const notes = [523.25, 659.25, 783.99]; // C5, E5, G5
-      notes.forEach((f, i) => {
+      const chords = [523.25, 659.25, 783.99, 1046.50]; // C - E - G - C6
+      chords.forEach((f, i) => {
         const osc = this.ctx.createOscillator();
         const gain = this.ctx.createGain();
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(f, now + i * 0.08);
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(f, now + i * 0.07);
 
-        gain.gain.setValueAtTime(0.3, now + i * 0.08);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.08 + 0.4);
+        gain.gain.setValueAtTime(0.35, now + i * 0.07);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.07 + 0.35);
 
         osc.connect(gain);
         gain.connect(this.masterGain);
 
-        osc.start(now + i * 0.08);
-        osc.stop(now + i * 0.08 + 0.45);
+        osc.start(now + i * 0.07);
+        osc.stop(now + i * 0.07 + 0.4);
       });
     } else {
-      // Rakip puanı: Düşük üzgün ton
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
       osc.type = 'sawtooth';
-      osc.frequency.setValueAtTime(180, now);
-      osc.frequency.linearRampToValueAtTime(110, now + 0.35);
+      osc.frequency.setValueAtTime(190, now);
+      osc.frequency.linearRampToValueAtTime(95, now + 0.32);
 
-      gain.gain.setValueAtTime(0.3, now);
-      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
+      gain.gain.setValueAtTime(0.28, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.32);
 
       osc.connect(gain);
       gain.connect(this.masterGain);
 
       osc.start(now);
-      osc.stop(now + 0.36);
+      osc.stop(now + 0.33);
     }
   }
 
   /**
-   * Maç Kazanıldığında Zafer Senfonisi
+   * Maç Kazanıldığında Kutlama Fanfarı
    */
   playMatchWon() {
     const now = this.ctx.currentTime;
-    const chords = [392.00, 523.25, 659.25, 783.99, 1046.50];
-    chords.forEach((f, i) => {
+    const fanfare = [392.00, 523.25, 659.25, 783.99, 1046.50, 1318.51];
+    fanfare.forEach((f, i) => {
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
       osc.type = 'triangle';
-      osc.frequency.setValueAtTime(f, now + i * 0.12);
+      osc.frequency.setValueAtTime(f, now + i * 0.1);
 
-      gain.gain.setValueAtTime(0.35, now + i * 0.12);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.12 + 0.8);
+      gain.gain.setValueAtTime(0.35, now + i * 0.1);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.1 + 0.7);
 
       osc.connect(gain);
       gain.connect(this.masterGain);
 
-      osc.start(now + i * 0.12);
-      osc.stop(now + i * 0.12 + 0.85);
+      osc.start(now + i * 0.1);
+      osc.stop(now + i * 0.1 + 0.75);
     });
   }
 }

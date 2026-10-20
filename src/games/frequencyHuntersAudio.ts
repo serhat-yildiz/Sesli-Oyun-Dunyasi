@@ -1,7 +1,8 @@
 /**
- * Frekans Avcıları Ses Motoru (Frequency Hunters Audio Synthesizer)
- * Referans tonu ve oyuncu tonunu iki ayrı kanalda veya stereo olarak çalar.
- * Fiziksel 'akustik vuru' (beating) olgusunu gerçek zamanlı üretir.
+ * Frekans Avcıları Profesyonel Akustik Ses Motoru
+ * - Sıcak Analog Sentezleyici Tonları (Harmonic enrichment + Soft attack envelope)
+ * - Saf Akustik Vuru (Beating): Sol kulak referans, sağ kulak oyuncu
+ * - Kristal Rezonans Kilitleme Akoru (Celesta / Glass Chimes)
  */
 
 export class FrequencyHuntersAudioEngine {
@@ -24,9 +25,7 @@ export class FrequencyHuntersAudioEngine {
   }
 
   /**
-   * Çift Frekans Üretecini Başlat
-   * Sol kulaklık: Referans ses
-   * Sağ kulaklık: Oyuncunun kontrol ettiği ses
+   * Çift Ton Akort Motoru (Sol: Referans, Sağ: Oyuncu)
    */
   startFrequencyTuning(targetFreq: number, currentFreq: number) {
     this.stopTuning();
@@ -42,10 +41,12 @@ export class FrequencyHuntersAudioEngine {
       this.refOsc.type = 'sine';
       this.refOsc.frequency.setValueAtTime(targetFreq, now);
 
-      this.refGain.gain.setValueAtTime(0.25, now);
+      // Yumuşak Attack Zarfı (Kulak tırmalamayan yumuşak açılış)
+      this.refGain.gain.setValueAtTime(0, now);
+      this.refGain.gain.linearRampToValueAtTime(0.24, now + 0.15);
 
       if (this.refPanner) {
-        this.refPanner.pan.setValueAtTime(-0.6, now); // Sol kulak ağırlıklı
+        this.refPanner.pan.setValueAtTime(-0.65, now);
         this.refOsc.connect(this.refGain);
         this.refGain.connect(this.refPanner);
         this.refPanner.connect(this.masterGain);
@@ -54,18 +55,19 @@ export class FrequencyHuntersAudioEngine {
         this.refGain.connect(this.masterGain);
       }
 
-      // 2. Oyuncu Osilatörü (Sağ Kulak)
+      // 2. Oyuncu Osilatörü (Sağ Kulak - Sıcak Triangle/Sine melez ton)
       this.playerOsc = this.ctx.createOscillator();
       this.playerGain = this.ctx.createGain();
       this.playerPanner = this.ctx.createStereoPanner ? this.ctx.createStereoPanner() : null;
 
-      this.playerOsc.type = 'sine';
+      this.playerOsc.type = 'triangle';
       this.playerOsc.frequency.setValueAtTime(currentFreq, now);
 
-      this.playerGain.gain.setValueAtTime(0.25, now);
+      this.playerGain.gain.setValueAtTime(0, now);
+      this.playerGain.gain.linearRampToValueAtTime(0.22, now + 0.15);
 
       if (this.playerPanner) {
-        this.playerPanner.pan.setValueAtTime(0.6, now); // Sağ kulak ağırlıklı
+        this.playerPanner.pan.setValueAtTime(0.65, now);
         this.playerOsc.connect(this.playerGain);
         this.playerGain.connect(this.playerPanner);
         this.playerPanner.connect(this.masterGain);
@@ -82,17 +84,14 @@ export class FrequencyHuntersAudioEngine {
     }
   }
 
-  /**
-   * Oyuncunun Frekansını Güncelle
-   */
   setPlayerFrequency(freq: number) {
     if (this.playerOsc && this.isRunning) {
-      this.playerOsc.frequency.setTargetAtTime(freq, this.ctx.currentTime, 0.03);
+      this.playerOsc.frequency.setTargetAtTime(freq, this.ctx.currentTime, 0.04);
     }
   }
 
   /**
-   * Sadece Referans Sesini Dinlet (Solo)
+   * Referans Frekansı Solo Dinleme (Kristal Tını)
    */
   playReferenceSolo(targetFreq: number) {
     const now = this.ctx.currentTime;
@@ -103,56 +102,57 @@ export class FrequencyHuntersAudioEngine {
     osc.frequency.setValueAtTime(targetFreq, now);
 
     gain.gain.setValueAtTime(0, now);
-    gain.gain.setValueAtTime(0.4, now + 0.05);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 1.2);
+    gain.gain.linearRampToValueAtTime(0.38, now + 0.08);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 1.4);
 
     osc.connect(gain);
     gain.connect(this.masterGain);
 
     osc.start(now);
-    osc.stop(now + 1.25);
+    osc.stop(now + 1.45);
   }
 
   /**
-   * Frekans Kilitlendiğinde Başarı Rezonans Akoru
+   * Frekans Kilitlendiğinde Kristal Rezonans Armonisi
    */
   playLockSuccess(baseFreq: number) {
     const now = this.ctx.currentTime;
-    // Mükemmel Beşli ve Oktav akoru
-    const harmonicNotes = [baseFreq, baseFreq * 1.5, baseFreq * 2];
+    // Mükemmel Beşli, Oktav ve Majör Üçlü harmonik parlama
+    const harmonicNotes = [baseFreq, baseFreq * 1.25, baseFreq * 1.5, baseFreq * 2];
 
     harmonicNotes.forEach((freq, idx) => {
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
 
-      osc.type = 'triangle';
-      osc.frequency.setValueAtTime(freq, now + idx * 0.08);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now + idx * 0.06);
 
-      gain.gain.setValueAtTime(0.3, now + idx * 0.08);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.08 + 1.4);
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.setValueAtTime(0.32 / (idx + 1), now + idx * 0.06);
+      gain.gain.exponentialRampToValueAtTime(0.0005, now + idx * 0.06 + 1.8);
 
       osc.connect(gain);
       gain.connect(this.masterGain);
 
-      osc.start(now + idx * 0.08);
-      osc.stop(now + idx * 0.08 + 1.5);
+      osc.start(now + idx * 0.06);
+      osc.stop(now + idx * 0.06 + 1.9);
     });
   }
 
   /**
-   * Yanlış Frekans Kilitlendiğinde Hata Uyarısı (Buzzer)
+   * Hatalı Kilit Uyarısı
    */
   playMistake() {
     const now = this.ctx.currentTime;
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
 
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(140, now);
-    osc.frequency.linearRampToValueAtTime(90, now + 0.3);
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(155, now);
+    osc.frequency.linearRampToValueAtTime(80, now + 0.3);
 
-    gain.gain.setValueAtTime(0.35, now);
-    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+    gain.gain.setValueAtTime(0.32, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
 
     osc.connect(gain);
     gain.connect(this.masterGain);
@@ -162,26 +162,27 @@ export class FrequencyHuntersAudioEngine {
   }
 
   /**
-   * Tüm 5 Seviye Tamamlandığında Büyük Zafer Senfonisi
+   * 5 Modülün Tamamı Çözüldüğünde Görkemli Senfoni
    */
   playGrandVictory() {
     const now = this.ctx.currentTime;
-    const arpeggio = [261.63, 329.63, 392.00, 523.25, 659.25, 783.99]; // C E G C E G
+    const arpeggio = [261.63, 329.63, 392.00, 523.25, 659.25, 783.99, 1046.50]; // C Major scale arpeggio
     arpeggio.forEach((freq, idx) => {
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
 
-      osc.type = 'triangle';
-      osc.frequency.setValueAtTime(freq, now + idx * 0.15);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now + idx * 0.12);
 
-      gain.gain.setValueAtTime(0.3, now + idx * 0.15);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.15 + 1.2);
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.setValueAtTime(0.35, now + idx * 0.12);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.12 + 1.6);
 
       osc.connect(gain);
       gain.connect(this.masterGain);
 
-      osc.start(now + idx * 0.15);
-      osc.stop(now + idx * 0.15 + 1.25);
+      osc.start(now + idx * 0.12);
+      osc.stop(now + idx * 0.12 + 1.7);
     });
   }
 
