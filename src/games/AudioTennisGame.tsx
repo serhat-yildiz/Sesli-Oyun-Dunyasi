@@ -83,31 +83,29 @@ export default function AudioTennisGame() {
           engineRef.current?.playWallHit();
           engineRef.current?.playPointScored(false);
 
-          setMatch((prev) => {
-            const nextOppScore = prev.opponentScore + 1;
-            const isGameOver = nextOppScore >= prev.targetScore;
+          const nextOppScore = match.opponentScore + 1;
+          const isGameOver = nextOppScore >= match.targetScore;
 
-            if (isGameOver) {
-              setGameState('lost');
-              const msg = `Sayı rakibin! Maçı rakip ${nextOppScore} - ${prev.playerScore} kazandı. Yeniden oynamak için butona bas.`;
-              setLastAnnouncement(msg);
-              announce(msg, 'assertive');
-            } else {
-              const msg = `Kaçırdın! Sayı rakibin. Skor: Sen ${prev.playerScore}, Rakip ${nextOppScore}.`;
-              setLastAnnouncement(msg);
-              announce(msg, 'assertive');
-              setTimeout(() => {
-                serveBall('opponent');
-              }, 1800);
-            }
+          if (isGameOver) {
+            setGameState('lost');
+            const msg = `Sayı rakibin! Maçı rakip ${nextOppScore} - ${match.playerScore} kazandı. Yeniden oynamak için butona bas.`;
+            setLastAnnouncement(msg);
+            announce(msg, 'assertive');
+          } else {
+            const msg = `Kaçırdın! Sayı rakibin. Skor: Sen ${match.playerScore}, Rakip ${nextOppScore}.`;
+            setLastAnnouncement(msg);
+            announce(msg, 'assertive');
+            setTimeout(() => {
+              serveBall('opponent');
+            }, 1800);
+          }
 
-            return {
-              ...prev,
-              opponentScore: nextOppScore,
-              rallyCount: 0,
-              ballSpeedMs: 1600, // Hızı sıfırla
-            };
-          });
+          setMatch((prev) => ({
+            ...prev,
+            opponentScore: nextOppScore,
+            rallyCount: 0,
+            ballSpeedMs: 1600, // Hızı sıfırla
+          }));
           return;
         }
       }
@@ -123,32 +121,30 @@ export default function AudioTennisGame() {
             engineRef.current?.playWallHit();
             engineRef.current?.playPointScored(true);
 
-            setMatch((prev) => {
-              const nextPlayerScore = prev.playerScore + 1;
-              const isGameOver = nextPlayerScore >= prev.targetScore;
+            const nextPlayerScore = match.playerScore + 1;
+            const isGameOver = nextPlayerScore >= match.targetScore;
 
-              if (isGameOver) {
-                setGameState('won');
-                engineRef.current?.playMatchWon();
-                const winMsg = `Muazzam! Maç Sayısı! Rakibi ${nextPlayerScore} - ${prev.opponentScore} mağlup ettin! Tebrikler!`;
-                setLastAnnouncement(winMsg);
-                announce(winMsg, 'assertive');
-              } else {
-                const msg = `Harika vuruş, rakip yetişemedi! Sayı senin! Skor: Sen ${nextPlayerScore}, Rakip ${prev.opponentScore}.`;
-                setLastAnnouncement(msg);
-                announce(msg, 'assertive');
-                setTimeout(() => {
-                  serveBall('player');
-                }, 1800);
-              }
+            if (isGameOver) {
+              setGameState('won');
+              engineRef.current?.playMatchWon();
+              const winMsg = `Muazzam! Maç Sayısı! Rakibi ${nextPlayerScore} - ${match.opponentScore} mağlup ettin! Tebrikler!`;
+              setLastAnnouncement(winMsg);
+              announce(winMsg, 'assertive');
+            } else {
+              const msg = `Harika vuruş, rakip yetişemedi! Sayı senin! Skor: Sen ${nextPlayerScore}, Rakip ${match.opponentScore}.`;
+              setLastAnnouncement(msg);
+              announce(msg, 'assertive');
+              setTimeout(() => {
+                serveBall('player');
+              }, 1800);
+            }
 
-              return {
-                ...prev,
-                playerScore: nextPlayerScore,
-                rallyCount: 0,
-                ballSpeedMs: 1600,
-              };
-            });
+            setMatch((prev) => ({
+              ...prev,
+              playerScore: nextPlayerScore,
+              rallyCount: 0,
+              ballSpeedMs: 1600,
+            }));
             return;
           } else {
             // Rakip vurdu, top geri dönüyor
@@ -204,19 +200,18 @@ export default function AudioTennisGame() {
       const newSpeed = Math.max(800, ballDurationRef.current - (isPerfect ? 140 : 80));
       ballDurationRef.current = newSpeed;
 
-      setMatch((prev) => {
-        const nextRally = prev.rallyCount + 1;
-        const msg = isPerfect
-          ? `MÜKEMMEL ŞUT! Ralli: ${nextRally}! Top fırtına gibi rakibe gidiyor.`
-          : `İyi vuruş! Ralli: ${nextRally}.`;
-        setLastAnnouncement(msg);
-        announce(msg, 'polite');
-        return {
-          ...prev,
-          rallyCount: nextRally,
-          ballSpeedMs: newSpeed,
-        };
-      });
+      const nextRally = match.rallyCount + 1;
+      const msg = isPerfect
+        ? `MÜKEMMEL ŞUT! Ralli: ${nextRally}! Top fırtına gibi rakibe gidiyor.`
+        : `İyi vuruş! Ralli: ${nextRally}.`;
+      setLastAnnouncement(msg);
+      announce(msg, 'polite');
+
+      setMatch((prev) => ({
+        ...prev,
+        rallyCount: nextRally,
+        ballSpeedMs: newSpeed,
+      }));
     } else {
       // Geç vuruş / kaçırma
       engineRef.current?.playWhiff();

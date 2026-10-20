@@ -19,18 +19,20 @@ export function AnnouncerProvider({ children }: { children: React.ReactNode }) {
   const [assertiveMessage, setAssertiveMessage] = useState<string>('');
 
   const announce = useCallback((text: string, politeness: Politeness = 'polite') => {
-    // 1. Ekran okuyucular için aria-live güncellemesi
-    if (politeness === 'assertive') {
-      setAssertiveMessage('');
-      setTimeout(() => {
-        setAssertiveMessage(text);
-      }, 50);
-    } else {
-      setPoliteMessage('');
-      setTimeout(() => {
-        setPoliteMessage(text);
-      }, 50);
-    }
+    // 1. Ekran okuyucular için aria-live güncellemesi (Microtask/setTimeout ile render döngüsü dışına taşı)
+    setTimeout(() => {
+      if (politeness === 'assertive') {
+        setAssertiveMessage('');
+        setTimeout(() => {
+          setAssertiveMessage(text);
+        }, 30);
+      } else {
+        setPoliteMessage('');
+        setTimeout(() => {
+          setPoliteMessage(text);
+        }, 30);
+      }
+    }, 0);
 
     // 2. Ekran okuyucusu açık olmayan kullanıcılar için Dahili Sesli Okuyucu (TTS)
     if (settings.ttsEnabled && typeof window !== 'undefined' && 'speechSynthesis' in window) {
