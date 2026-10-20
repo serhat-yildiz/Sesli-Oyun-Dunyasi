@@ -1,9 +1,11 @@
+export type TennisZone = 'left' | 'center' | 'right';
+
 export interface TennisMatchState {
   playerScore: number;
   opponentScore: number;
   rallyCount: number;
   targetScore: number;
-  ballSpeedMs: number; // Topun bir uçtan diğerine gitme süresi
+  ballSpeedMs: number;
 }
 
 export const INITIAL_TENNIS_STATE: TennisMatchState = {
@@ -11,24 +13,21 @@ export const INITIAL_TENNIS_STATE: TennisMatchState = {
   opponentScore: 0,
   rallyCount: 0,
   targetScore: 5,
-  ballSpeedMs: 1600, // Başlangıçta 1.6 saniye
+  ballSpeedMs: 1500,
 };
 
 export type HitTiming = 'too_early' | 'good' | 'perfect' | 'late' | 'miss';
 
-/**
- * Topun vuruş aralığını analiz et (0.0: Rakipte, 1.0: Tam oyuncunun raketinde)
- */
 export function evaluateTiming(progress: number): HitTiming {
   if (progress < 0.65) {
-    return 'too_early'; // Çok erken, raket boşa savruldu
+    return 'too_early';
   } else if (progress >= 0.70 && progress < 0.88) {
-    return 'good'; // İyi vuruş
+    return 'good';
   } else if (progress >= 0.88 && progress <= 1.05) {
-    return 'perfect'; // Mükemmel vuruş (En sert ve hızlı)
+    return 'perfect';
   } else if (progress > 1.05 && progress <= 1.20) {
-    return 'late'; // Çok geç vuruş
+    return 'late';
   } else {
-    return 'miss'; // Tamamen kaçırıldı
+    return 'miss';
   }
 }

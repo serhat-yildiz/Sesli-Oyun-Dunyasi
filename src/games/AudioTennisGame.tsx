@@ -4,28 +4,36 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAudio } from '@/context/AudioContext';
 import { useAnnouncer } from '@/context/AnnouncerContext';
 import { AudioTennisAudioEngine } from './audioTennisAudio';
-import { INITIAL_TENNIS_STATE, TennisMatchState, evaluateTiming } from './audioTennisLogic';
+import { INITIAL_TENNIS_STATE, TennisMatchState, TennisZone, evaluateTiming } from './audioTennisLogic';
 
 export default function AudioTennisGame() {
   const { initAudio, stopAudio, audioCtxRef, masterGainRef } = useAudio();
   const { announce } = useAnnouncer();
 
-  const [gameState, setGameState] = useState<'idle' | 'serving' | 'rally' | 'paused' | 'won' | 'lost'>('idle');
+  const [gameState, setGameState] = useState<'idle' | 'rally' | 'paused' | 'won' | 'lost'>('idle');
   const [match, setMatch] = useState<TennisMatchState>(INITIAL_TENNIS_STATE);
   const [lastAnnouncement, setLastAnnouncement] = useState('Akustik Tenis Kortu. Başlamak için butona basın.');
 
+  // Ref'ler ile state kapanış (closure) sorunlarını tamamen önleme
   const matchRef = useRef<TennisMatchState>(INITIAL_TENNIS_STATE);
   matchRef.current = match;
+
+  const gameStateRef = useRef<'idle' | 'rally' | 'paused' | 'won' | 'lost'>('idle');
+  gameStateRef.current = gameState;
 
   const engineRef = useRef<AudioTennisAudioEngine | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Top animasyon ve zamanlama referansları
+  // Top ve yön referansları
   const ballStartTimeRef = useRef<number>(0);
-  const ballDurationRef = useRef<number>(1600);
+  const ballDurationRef = useRef<number>(1500);
   const ballDirectionRef = useRef<'towards_player' | 'towards_opponent'>('towards_player');
   const ballActiveRef = useRef<boolean>(false);
   const bounceScheduledRef = useRef<boolean>(false);
+  const incomingZoneRef = useRef<TennisZone>('center'); // 'left' | 'center' | 'right'
+
+  // Servis timer referansı
+  const serveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Ses motorunu hazırla
   useEffect(() => {
@@ -39,124 +47,145 @@ export default function AudioTennisGame() {
 
   // Yeni Servis Başlat
   const serveBall = useCallback((server: 'player' | 'opponent' = 'opponent') => {
+    if (gameStateRef.current !== 'rally') return;
+
     ballActiveRef.current = true;
     bounceScheduledRef.current = false;
     ballStartTimeRef.current = performance.now();
     ballDurationRef.current = matchRef.current.ballSpeedMs;
 
+    // Rastgele yön seç (Sol, Orta, Sağ)
+    const zones: TennisZone[] = ['left', 'center', 'right'];
+    const chosenZone = zones[Math.floor(Math.random() * zones.length)];
+    incomingZoneRef.current = chosenZone;
+
+    const zonePan = chosenZone === 'left' ? -0.85 : chosenZone === 'right' ? 0.85 : 0.0;
+    const zoneNameTr = chosenZone === 'left' ? 'SOL KÖŞEDEN' : chosenZone === 'right' ? 'SAĞ KÖŞEDEN' : 'ORTADAN';
+
     if (server === 'opponent') {
       ballDirectionRef.current = 'towards_player';
-      engineRef.current?.playHit(-0.9, true, 'opponent');
-      setLastAnnouncement('Rakip servis attı! Top sol kulaktan sana doğru yaklaşıyor.');
-      announce('Rakip servis attı! Dinle.', 'polite');
+      engineRef.current?.playHit(zonePan, true, 'opponent', chosenZone);
+      const msg = `Rakip servis attı! Top ${zoneNameTr} geliyor!`;
+      setLastAnnouncement(msg);
+      announce(msg, 'polite');
     } else {
       ballDirectionRef.current = 'towards_opponent';
-      engineRef.current?.playHit(0.9, true, 'good');
-      setLastAnnouncement('Servisi attın! Top rakibe doğru gidiyor.');
-      announce('Servisi attın!', 'polite');
+      engineRef.current?.playHit(zonePan, true, 'good', chosenZone);
+      const msg = `Servisi ${zoneNameTr} attın! Top rakibe gidiyor.`;
+      setLastAnnouncement(msg);
+      announce(msg, 'polite');
     }
-
-    setGameState('rally');
   }, [announce]);
 
-  // Oyun Döngüsü (Topun hareketi ve kaçırılma kontrolü)
-  useEffect(() => {
-    if (gameState !== 'rally') return;
+  // Sayı bittiğinde güvenli servis planlayıcı
+  const scheduleNextServe = useCallback((server: 'player' | 'opponent', delayMs: number = 2000) => {
+    if (serveTimeoutRef.current) clearTimeout(serveTimeoutRef.current);
+    serveTimeoutRef.current = setTimeout(() => {
+      if (gameStateRef.current === 'rally') {
+        serveBall(server);
+      }
+    }, delayMs);
+  }, [serveBall]);
 
+  // Ana Animasyon / Oyun Döngüsü
+  useEffect(() => {
     let animId: number;
 
     const loop = (now: number) => {
-      if (!ballActiveRef.current) return;
+      if (gameStateRef.current === 'rally' && ballActiveRef.current) {
+        const elapsed = now - ballStartTimeRef.current;
+        const progress = elapsed / ballDurationRef.current;
+        const currentZone = incomingZoneRef.current;
+        const zonePan = currentZone === 'left' ? -0.85 : currentZone === 'right' ? 0.85 : 0.0;
 
-      const elapsed = now - ballStartTimeRef.current;
-      const progress = elapsed / ballDurationRef.current;
-
-      // 1. Masa Sekmesi (Progress %45 civarında masada seker)
-      if (progress >= 0.45 && !bounceScheduledRef.current) {
-        bounceScheduledRef.current = true;
-        const bouncePan = ballDirectionRef.current === 'towards_player' ? -0.1 : 0.1;
-        engineRef.current?.playHit(bouncePan, false, 'good');
-      }
-
-      // 2. Oyuncuya Doğru Geliyorsa ve Kaçırıldıysa
-      if (ballDirectionRef.current === 'towards_player') {
-        if (progress > 1.25) {
-          // Top kaçırıldı! Duvara çarptı
-          ballActiveRef.current = false;
-          engineRef.current?.playWallHit();
-          engineRef.current?.playPointScored(false);
-
-          const nextOppScore = matchRef.current.opponentScore + 1;
-          const isGameOver = nextOppScore >= matchRef.current.targetScore;
-
-          if (isGameOver) {
-            setGameState('lost');
-            const msg = `Sayı rakibin! Maçı rakip ${nextOppScore} - ${matchRef.current.playerScore} kazandı. Yeniden oynamak için butona bas.`;
-            setLastAnnouncement(msg);
-            announce(msg, 'assertive');
-          } else {
-            const msg = `Kaçırdın! Sayı rakibin. Skor: Sen ${matchRef.current.playerScore}, Rakip ${nextOppScore}.`;
-            setLastAnnouncement(msg);
-            announce(msg, 'assertive');
-            setTimeout(() => {
-              serveBall('opponent');
-            }, 1800);
-          }
-
-          setMatch((prev) => ({
-            ...prev,
-            opponentScore: nextOppScore,
-            rallyCount: 0,
-            ballSpeedMs: 1600, // Hızı sıfırla
-          }));
-          return;
+        // 1. Masa Sekmesi (%45)
+        if (progress >= 0.45 && !bounceScheduledRef.current) {
+          bounceScheduledRef.current = true;
+          engineRef.current?.playHit(zonePan, false, 'good', currentZone);
         }
-      }
 
-      // 3. Rakibe Doğru Gidiyorsa (Rakip vuruş simülasyonu)
-      if (ballDirectionRef.current === 'towards_opponent') {
-        if (progress >= 1.0) {
-          // Rakip karşılar (küçük bir şansla rakip de kaçırabilir)
-          const opponentMissChance = matchRef.current.rallyCount > 6 ? 0.35 : 0.12;
-          if (Math.random() < opponentMissChance) {
-            // Rakip kaçırdı! Oyuncu sayı aldı
+        // 2. Oyuncuya Doğru Gelirken Kaçırılma
+        if (ballDirectionRef.current === 'towards_player') {
+          if (progress > 1.25) {
             ballActiveRef.current = false;
             engineRef.current?.playWallHit();
-            engineRef.current?.playPointScored(true);
+            engineRef.current?.playPointScored(false);
 
-            const nextPlayerScore = matchRef.current.playerScore + 1;
-            const isGameOver = nextPlayerScore >= matchRef.current.targetScore;
+            const nextOppScore = matchRef.current.opponentScore + 1;
+            const isGameOver = nextOppScore >= matchRef.current.targetScore;
 
             if (isGameOver) {
-              setGameState('won');
-              engineRef.current?.playMatchWon();
-              const winMsg = `Muazzam! Maç Sayısı! Rakibi ${nextPlayerScore} - ${matchRef.current.opponentScore} mağlup ettin! Tebrikler!`;
-              setLastAnnouncement(winMsg);
-              announce(winMsg, 'assertive');
-            } else {
-              const msg = `Harika vuruş, rakip yetişemedi! Sayı senin! Skor: Sen ${nextPlayerScore}, Rakip ${matchRef.current.opponentScore}.`;
+              setGameState('lost');
+              const msg = `Sayı rakibin! Maçı rakip ${nextOppScore} - ${matchRef.current.playerScore} kazandı. Yeniden oynamak için butona bas.`;
               setLastAnnouncement(msg);
               announce(msg, 'assertive');
-              setTimeout(() => {
-                serveBall('player');
-              }, 1800);
+            } else {
+              const msg = `Topu kaçırdın! Sayı rakibin. Skor: Sen ${matchRef.current.playerScore}, Rakip ${nextOppScore}.`;
+              setLastAnnouncement(msg);
+              announce(msg, 'assertive');
+              scheduleNextServe('opponent', 2000);
             }
 
             setMatch((prev) => ({
               ...prev,
-              playerScore: nextPlayerScore,
+              opponentScore: nextOppScore,
               rallyCount: 0,
-              ballSpeedMs: 1600,
+              ballSpeedMs: 1500,
             }));
-            return;
-          } else {
-            // Rakip vurdu, top geri dönüyor
-            ballStartTimeRef.current = performance.now();
-            ballDirectionRef.current = 'towards_player';
-            bounceScheduledRef.current = false;
-            engineRef.current?.playHit(-0.85, true, 'opponent');
-            setLastAnnouncement('Rakip sert karşıladı! Top sana doğru hızla geliyor!');
-            announce('Rakip karşıladı, top geliyor!', 'polite');
+          }
+        }
+
+        // 3. Rakibe Doğru Giderken
+        if (ballDirectionRef.current === 'towards_opponent') {
+          if (progress >= 1.0) {
+            // Rakip karşılama simülasyonu
+            const opponentMissChance = matchRef.current.rallyCount > 5 ? 0.35 : 0.15;
+            if (Math.random() < opponentMissChance) {
+              // Rakip kaçırdı, oyuncu sayı kazandı!
+              ballActiveRef.current = false;
+              engineRef.current?.playWallHit();
+              engineRef.current?.playPointScored(true);
+
+              const nextPlayerScore = matchRef.current.playerScore + 1;
+              const isGameOver = nextPlayerScore >= matchRef.current.targetScore;
+
+              if (isGameOver) {
+                setGameState('won');
+                engineRef.current?.playMatchWon();
+                const winMsg = `MUHTEŞEM! Maç Sayısı! Rakibi ${nextPlayerScore} - ${matchRef.current.opponentScore} mağlup ettin! Alkışlar senin için!`;
+                setLastAnnouncement(winMsg);
+                announce(winMsg, 'assertive');
+              } else {
+                const msg = `Müthiş vuruş! Sayı senin! Skor: Sen ${nextPlayerScore}, Rakip ${matchRef.current.opponentScore}.`;
+                setLastAnnouncement(msg);
+                announce(msg, 'assertive');
+                scheduleNextServe('player', 2200);
+              }
+
+              setMatch((prev) => ({
+                ...prev,
+                playerScore: nextPlayerScore,
+                rallyCount: 0,
+                ballSpeedMs: 1500,
+              }));
+            } else {
+              // Rakip karşıladı, yeni rastgele yön ile oyuncuya geri dönüyor!
+              const zones: TennisZone[] = ['left', 'center', 'right'];
+              const returnZone = zones[Math.floor(Math.random() * zones.length)];
+              incomingZoneRef.current = returnZone;
+
+              ballStartTimeRef.current = performance.now();
+              ballDirectionRef.current = 'towards_player';
+              bounceScheduledRef.current = false;
+
+              const retPan = returnZone === 'left' ? -0.85 : returnZone === 'right' ? 0.85 : 0.0;
+              engineRef.current?.playHit(retPan, true, 'opponent', returnZone);
+
+              const retNameTr = returnZone === 'left' ? 'SOLA' : returnZone === 'right' ? 'SAĞA' : 'ORTAYA';
+              const returnMsg = `Rakip sert karşıladı! Top ${retNameTr} geliyor!`;
+              setLastAnnouncement(returnMsg);
+              announce(returnMsg, 'polite');
+            }
           }
         }
       }
@@ -165,14 +194,17 @@ export default function AudioTennisGame() {
     };
 
     animId = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(animId);
-  }, [gameState, serveBall, announce]);
+    return () => {
+      cancelAnimationFrame(animId);
+      if (serveTimeoutRef.current) clearTimeout(serveTimeoutRef.current);
+    };
+  }, [announce, scheduleNextServe]);
 
-  // Oyuncunun Vuruş Yapması
-  const handlePlayerHit = useCallback((type: 'straight' | 'left' | 'right' = 'straight') => {
-    if (gameState !== 'rally' || !ballActiveRef.current) {
+  // Oyuncunun Vuruş Yapması ve Yön Kontrolü
+  const handlePlayerHit = useCallback((playerAction: 'straight' | 'left' | 'right') => {
+    if (gameStateRef.current !== 'rally' || !ballActiveRef.current) {
       engineRef.current?.playWhiff();
-      announce('Boşa salladın, top henüz gelmedi!', 'polite');
+      announce('Top henüz gelmedi!', 'polite');
       return;
     }
 
@@ -184,53 +216,95 @@ export default function AudioTennisGame() {
     const progress = elapsed / ballDurationRef.current;
     const timing = evaluateTiming(progress);
 
+    // 1. Zamanlama Kontrolü
     if (timing === 'too_early') {
       engineRef.current?.playWhiff();
       announce('Çok erken salladın!', 'polite');
       return;
     }
 
-    if (timing === 'good' || timing === 'perfect') {
-      // Başarılı vuruş! Top rakibe geri dönüyor
-      const isPerfect = timing === 'perfect';
-      const hitPan = type === 'left' ? 0.4 : type === 'right' ? 0.95 : 0.7;
-      engineRef.current?.playHit(hitPan, true, isPerfect ? 'perfect' : 'good');
+    if (timing === 'miss' || timing === 'late') {
+      engineRef.current?.playWhiff();
+      announce('Geç kaldın!', 'polite');
+      return;
+    }
 
-      ballDirectionRef.current = 'towards_opponent';
-      ballStartTimeRef.current = performance.now();
-      bounceScheduledRef.current = false;
+    // 2. YÖN DOĞRULAMA KONTROLÜ (Gelen Yöne Göre Doğru Tuş)
+    // incomingZoneRef: 'left' -> Sol Ok, 'right' -> Sağ Ok, 'center' -> Boşluk (straight)
+    const requiredAction =
+      incomingZoneRef.current === 'left' ? 'left' : incomingZoneRef.current === 'right' ? 'right' : 'straight';
 
-      // Hızı kademeli olarak artır (Ralli temposu)
-      const newSpeed = Math.max(800, ballDurationRef.current - (isPerfect ? 140 : 80));
-      ballDurationRef.current = newSpeed;
+    if (playerAction !== requiredAction) {
+      // YANLIŞ TUŞA BASILDI! Fileye takıldı / Dışarı gitti
+      ballActiveRef.current = false;
+      engineRef.current?.playNetFault();
+      engineRef.current?.playPointScored(false);
 
-      const nextRally = matchRef.current.rallyCount + 1;
-      const msg = isPerfect
-        ? `MÜKEMMEL ŞUT! Ralli: ${nextRally}! Top fırtına gibi rakibe gidiyor.`
-        : `İyi vuruş! Ralli: ${nextRally}.`;
-      setLastAnnouncement(msg);
-      announce(msg, 'polite');
+      const nextOppScore = matchRef.current.opponentScore + 1;
+      const isGameOver = nextOppScore >= matchRef.current.targetScore;
+
+      const expectedText =
+        incomingZoneRef.current === 'left'
+          ? 'Sol Ok tuşuna basmalıydın'
+          : incomingZoneRef.current === 'right'
+          ? 'Sağ Ok tuşuna basmalıydın'
+          : 'Boşluk tuşuna basmalıydın';
+
+      if (isGameOver) {
+        setGameState('lost');
+        const msg = `Yanlış yön! ${expectedText}. Maçı rakip kazandı!`;
+        setLastAnnouncement(msg);
+        announce(msg, 'assertive');
+      } else {
+        const msg = `Hata! Top farklı yöndeydi, ${expectedText}! Sayı rakibin. Skor: Sen ${matchRef.current.playerScore}, Rakip ${nextOppScore}.`;
+        setLastAnnouncement(msg);
+        announce(msg, 'assertive');
+        scheduleNextServe('opponent', 2200);
+      }
 
       setMatch((prev) => ({
         ...prev,
-        rallyCount: nextRally,
-        ballSpeedMs: newSpeed,
+        opponentScore: nextOppScore,
+        rallyCount: 0,
+        ballSpeedMs: 1500,
       }));
-    } else {
-      // Geç vuruş / kaçırma
-      engineRef.current?.playWhiff();
-      announce('Geç kaldın!', 'polite');
+      return;
     }
-  }, [gameState, announce]);
 
-  // Skor ve Durum Raporu (P tuşu)
+    // 3. DOĞRU YÖN VE DOĞRU ZAMANLAMA -> Mükemmel Vuruş!
+    const isPerfect = timing === 'perfect';
+    engineRef.current?.playHit(0.5, true, isPerfect ? 'perfect' : 'good', incomingZoneRef.current);
+
+    ballDirectionRef.current = 'towards_opponent';
+    ballStartTimeRef.current = performance.now();
+    bounceScheduledRef.current = false;
+
+    // Hızı kademeli artır
+    const newSpeed = Math.max(750, ballDurationRef.current - (isPerfect ? 130 : 70));
+    ballDurationRef.current = newSpeed;
+
+    const nextRally = matchRef.current.rallyCount + 1;
+    const msg = isPerfect
+      ? `DOĞRU KÖŞE VE MÜKEMMEL ŞUT! Ralli: ${nextRally}! Top fırtına gibi gidiyor!`
+      : `Harika vuruş! Doğru yön! Ralli: ${nextRally}.`;
+    setLastAnnouncement(msg);
+    announce(msg, 'polite');
+
+    setMatch((prev) => ({
+      ...prev,
+      rallyCount: nextRally,
+      ballSpeedMs: newSpeed,
+    }));
+  }, [announce, scheduleNextServe]);
+
+  // Skor Raporu (P tuşu)
   const reportScore = useCallback(() => {
-    const report = `Mevcut Skor: Sen ${match.playerScore}, Rakip ${match.opponentScore}. Mevcut ralli: ${match.rallyCount}. Hedef puan: ${match.targetScore}. Vurmak için Boşluk tuşuna bas.`;
+    const report = `Mevcut Skor: Sen ${matchRef.current.playerScore}, Rakip ${matchRef.current.opponentScore}. Ralli: ${matchRef.current.rallyCount}. Hedef puan: ${matchRef.current.targetScore}.`;
     setLastAnnouncement(report);
     announce(report, 'assertive');
-  }, [match, announce]);
+  }, [announce]);
 
-  // Oyunu Başlat
+  // Maçı Başlat
   const handleStartGame = async () => {
     const success = await initAudio();
     if (success) {
@@ -242,7 +316,9 @@ export default function AudioTennisGame() {
       }
 
       setMatch(INITIAL_TENNIS_STATE);
-      const startMsg = 'Akustik Tenis Maçı Başladı! 5 puana ilk ulaşan kazanır. Sol kulaktan gelen top masada sekip sağ kulağına yaklaştığında Boşluk tuşu ile raket vur! Skor için P tuşuna bas.';
+      setGameState('rally');
+
+      const startMsg = 'Akustik Tenis Maçı Başladı! Top nereden geliyorsa oraya vur: Soldan geliyorsa Sol Ok, Sağdan geliyorsa Sağ Ok, Ortadan geliyorsa Boşluk tuşu! Yanlış tuş sayıyı kaybettirir.';
       setLastAnnouncement(startMsg);
       announce(startMsg, 'assertive');
 
@@ -255,9 +331,9 @@ export default function AudioTennisGame() {
 
   // Klavye Dinleyicisi
   useEffect(() => {
-    if (gameState !== 'rally') return;
-
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (gameStateRef.current !== 'rally') return;
+
       if (e.key === 'Escape') {
         e.preventDefault();
         setGameState('paused');
@@ -285,7 +361,7 @@ export default function AudioTennisGame() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [gameState, handlePlayerHit, reportScore, announce]);
+  }, [handlePlayerHit, reportScore, announce]);
 
   return (
     <section
@@ -300,7 +376,7 @@ export default function AudioTennisGame() {
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.5rem' }}>
         <div>
-          <h2 style={{ margin: 0 }}>Akustik Ses Kortu</h2>
+          <h2 style={{ margin: 0 }}>Akustik Ses Kortu (Gelişmiş Refleks Modu)</h2>
           <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.95rem' }}>
             Skor: Sen {match.playerScore} - {match.opponentScore} Rakip | Ralli: {match.rallyCount}
           </p>
@@ -385,7 +461,7 @@ export default function AudioTennisGame() {
         {gameState === 'rally' && (
           <div>
             <p style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--text-main)', marginBottom: '0.75rem' }}>
-              🎾 Maç Aktif — Topun Yaklaşmasını Dinleyin!
+              🎾 Maç Aktif — Topun Geldiği Yöne Dikkat Edin!
             </p>
             <div
               style={{
@@ -402,7 +478,7 @@ export default function AudioTennisGame() {
               </p>
             </div>
             <p style={{ fontSize: '0.95rem', color: 'var(--text-muted)', marginTop: '1.25rem' }}>
-              Düz Vuruş: <kbd className="key-badge">Boşluk (Space)</kbd> | Sol Köşe: <kbd className="key-badge">Sol Ok</kbd> | Sağ Köşe: <kbd className="key-badge">Sağ Ok</kbd> | Skor: <kbd className="key-badge">P</kbd>
+              Ortadan Geliyorsa: <kbd className="key-badge">Boşluk (Space)</kbd> | Soldan Geliyorsa: <kbd className="key-badge">Sol Ok</kbd> | Sağdan Geliyorsa: <kbd className="key-badge">Sağ Ok</kbd>
             </p>
           </div>
         )}
@@ -419,10 +495,10 @@ export default function AudioTennisGame() {
         {gameState === 'won' && (
           <div>
             <p style={{ fontSize: '1.6rem', fontWeight: 800, color: '#34d399', marginBottom: '0.5rem' }}>
-              🏆 Tebrikler, Maçı Sen Kazandın!
+              🏆 Muazzam Şampiyonluk!
             </p>
             <p style={{ maxWidth: '600px', margin: '0 auto 1.5rem auto' }}>
-              Olağanüstü refleksler! 5 puana ilk sen ulaştın ve şampiyonluk kupasını kaldırdın!
+              Bütün köşeleri kusursuz savundun, 5 puana ulaştın ve seyircilerin alkışları eşliğinde kupayı kaldırdın!
             </p>
             <button type="button" onClick={handleStartGame} className="btn btn-primary">
               Yeni Maç Başlat
@@ -436,7 +512,7 @@ export default function AudioTennisGame() {
               🎾 Maçı Rakip Kazandı!
             </p>
             <p style={{ maxWidth: '600px', margin: '0 auto 1.5rem auto' }}>
-              Çok çekişmeli bir mücadeleydi! Zamanlamana biraz daha odaklanıp tekrar dene.
+              Rakip ters köşelerle sayıları topladı. Topun sol ve sağ kulaktaki yönünü daha iyi dinleyip tekrar dene!
             </p>
             <button type="button" onClick={handleStartGame} className="btn btn-primary">
               Tekrar Oyna
@@ -447,11 +523,11 @@ export default function AudioTennisGame() {
         {gameState === 'idle' && (
           <div>
             <p style={{ fontSize: '1.2rem', color: 'var(--text-main)', marginBottom: '0.75rem' }}>
-              🏓 <strong>Akustik Tenis: Ses Kortu</strong>
+              🏓 <strong>Akustik Tenis: Gelişmiş Yön ve Refleks Kortu</strong>
             </p>
             <p style={{ color: 'var(--text-muted)', maxWidth: '600px', margin: '0 auto' }}>
               Kulaklığınızı takın ve <strong>&ldquo;Maçı Başlat&rdquo;</strong> düğmesine basın.
-              Sol kulaktan atılan top masada sekip sağ kulağınıza ulaştığında tam zamanında <kbd className="key-badge">Boşluk</kbd> tuşuna basın!
+              Ses <strong>soldan geliyorsa Sol Ok</strong>, <strong>sağdan geliyorsa Sağ Ok</strong>, <strong>ortadan geliyorsa Boşluk</strong> tuşuna basın. Yanlış tuşa basarsanız top fileye takılır ve sayıyı kaybedersiniz!
             </p>
           </div>
         )}
